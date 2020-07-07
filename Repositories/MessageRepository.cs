@@ -15,14 +15,14 @@ namespace ExampleAdvancedCircuitBreakerWithPolly.Repositories
         public async ValueTask<string> GetHelloMessage()
         {
             Trace.WriteLine("MessageRepository GetHelloMessage running");
-            //ThrowRandomException();
+            ThrowRandomException();
             return "Hello World!";
         }
 
         public async ValueTask<string> GetGoodbyeMessage()
         {
             Trace.WriteLine("MessageRepository GetGoodbyeMessage running");
-            //ThrowRandomException();
+            ThrowRandomException();
             return "Goodbye World!";
         }
         private static void ThrowRandomException()
