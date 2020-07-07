@@ -12,18 +12,18 @@ namespace ExampleAdvancedCircuitBreakerWithPolly.Repositories
 
     public class MessageRepository : IMessageRepository
     {
-        public async ValueTask<string> GetHelloMessage()
+        public ValueTask<string> GetHelloMessage()
         {
             Trace.WriteLine("MessageRepository GetHelloMessage running");
             ThrowRandomException();
-            return "Hello World!";
+            return new ValueTask<string>("Hello World!");
         }
 
-        public async ValueTask<string> GetGoodbyeMessage()
+        public ValueTask<string> GetGoodbyeMessage()
         {
             Trace.WriteLine("MessageRepository GetGoodbyeMessage running");
             ThrowRandomException();
-            return "Goodbye World!";
+            return new ValueTask<string>("Goodbye World!");
         }
         private static void ThrowRandomException()
         {
