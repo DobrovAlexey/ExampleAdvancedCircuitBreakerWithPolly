@@ -24,22 +24,32 @@ namespace ExampleAdvancedCircuitBreakerWithPolly.Services
         {
             _messageRepository = messageRepository;
 
+            // Политика повторителя.
             _retryPolicy = Policy
                 .Handle<Exception>()
+                // retryCount - указывает, сколько раз вы хотите повторить попытку.
+                // sleepDurationProvider - делегат, который определяет, как долго ждать перед повторной попыткой. 
                 .WaitAndRetryAsync(2, retryAttempt =>
                 {
+                    // Экспоненциальное время ожидания.
                     var timeToWait = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
 
                     Trace.WriteLine($"Waiting {timeToWait.TotalSeconds} seconds");
                     return timeToWait;
-                }); 
+                });
 
-            _circuitBreakerPolicy = Policy.Handle<Exception>()
-                .CircuitBreakerAsync(1, TimeSpan.FromMinutes(1),
+            // Политика выключателя.
+            _circuitBreakerPolicy = Policy
+                .Handle<Exception>()
+                // exceptionsAllowedBeforeBreaking - указывает, сколько исключений подряд вызовет разрыв цепи.
+                // durationOfBreak - указывает, как долго цепь будет оставаться разорванной.
+                .CircuitBreakerAsync(1, TimeSpan.FromSeconds(30),
+                    // onBreak - является делегатом, позволяет выполнить какое-то действие, когда цепь разорвана.
                     (exception, timeSpan) =>
                     {
                         Trace.WriteLine("Circuit broken!");
                     },
+                    // onReset - является делегатом, позволяет выполнить какое-либо действие, когда канал сброшен
                     () =>
                     {
                         Trace.WriteLine("Circuit Reset!");
@@ -48,26 +58,31 @@ namespace ExampleAdvancedCircuitBreakerWithPolly.Services
 
         public async Task<string> GetHelloMessage()
         {
-            //return await _messageRepository.GetHelloMessage();
-            return await _retryPolicy.ExecuteAsync<string>(async () => await _messageRepository.GetHelloMessage());
+            // Обращаемся к репозиторию, через политику повторителя.
+            return await _retryPolicy.ExecuteAsync(async () => await _messageRepository.GetHelloMessage());
         }
 
         public async Task<string> GetGoodbyeMessage()
         {
-            //return await _messageRepository.GetGoodbyeMessage();
+            Trace.WriteLine($"Circuit State: {_circuitBreakerPolicy.CircuitState}");
 
-            try
+            // Если выключатель открыт, обходим запрос в репозиторий и выводим статические данные.
+            if (_circuitBreakerPolicy.CircuitState != CircuitState.Open)
             {
-                Trace.WriteLine($"Circuit State: {_circuitBreakerPolicy.CircuitState}");
-                return await _circuitBreakerPolicy.ExecuteAsync<string>(async () =>
+                try
                 {
-                    return await _messageRepository.GetGoodbyeMessage();
-                });
+                    // Обращаемся к репозиторию, через политику выключателя.
+                    return await _circuitBreakerPolicy.ExecuteAsync(async () => await _messageRepository.GetGoodbyeMessage());
+                }
+                catch (Exception e)
+                {
+                    // В случае ошибки, выключатель перейдет в открытое состояние, на указанное время.
+                    // Игнорируем ошибку и выводим статические данные.
+                    Trace.WriteLine(e.Message);
+                }
             }
-            catch (Exception ex)
-            {
-                return ex.Message;
-            }
+
+            return await new ValueTask<string>("Bypassing a request to the repository.");
         }
     }
 }
