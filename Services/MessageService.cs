@@ -5,6 +5,7 @@ using ExampleAdvancedCircuitBreakerWithPolly.Repositories;
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Retry;
+using Polly.Wrap;
 
 namespace ExampleAdvancedCircuitBreakerWithPolly.Services
 {
@@ -18,10 +19,12 @@ namespace ExampleAdvancedCircuitBreakerWithPolly.Services
     {
         private readonly IMessageRepository _messageRepository;
         private readonly AsyncRetryPolicy _retryPolicy;
-        private readonly AsyncCircuitBreakerPolicy _circuitBreakerPolicy;
+        private readonly AsyncCircuitBreakerPolicy<string> _circuitBreakerPolicy;
+        private readonly AsyncPolicyWrap<string> _policyWrap;
 
         public MessageService(IMessageRepository messageRepository)
         {
+            Trace.WriteLine("MessageService running");
             _messageRepository = messageRepository;
 
             // Политика повторителя.
@@ -39,7 +42,9 @@ namespace ExampleAdvancedCircuitBreakerWithPolly.Services
                 });
 
             // Политика выключателя.
-            _circuitBreakerPolicy = Policy
+            // Обращаемся к репозиторию, через объединение политик.
+            // В случае ошибки, выключатель перейдет в открытое состояние, на указанное время.
+            _circuitBreakerPolicy = Policy<string>
                 .Handle<Exception>()
                 // exceptionsAllowedBeforeBreaking - указывает, сколько исключений подряд вызовет разрыв цепи.
                 // durationOfBreak - указывает, как долго цепь будет оставаться разорванной.
@@ -47,13 +52,28 @@ namespace ExampleAdvancedCircuitBreakerWithPolly.Services
                     // onBreak - является делегатом, позволяет выполнить какое-то действие, когда цепь разорвана.
                     (exception, timeSpan) =>
                     {
-                        Trace.WriteLine("Circuit broken!");
+                        Trace.WriteLine($"Circuit broken! {timeSpan}");
                     },
                     // onReset - является делегатом, позволяет выполнить какое-либо действие, когда канал сброшен
                     () =>
                     {
                         Trace.WriteLine("Circuit Reset!");
                     });
+
+
+            // Политика подмены исключения на ответ.
+            // Игнорируем ошибку и выводим статические данные.
+            var fallbackPolicy = Policy<string>
+                .Handle<Exception>()
+                .FallbackAsync(async token =>
+                {
+                    Trace.WriteLine("Return Fallback");
+
+                    return await new ValueTask<string>("Bypassing a request to the repository.");
+                });
+
+            // Объединение политик в одну.
+            _policyWrap = Policy.WrapAsync(fallbackPolicy, _circuitBreakerPolicy);
         }
 
         public async Task<string> GetHelloMessage()
@@ -66,23 +86,7 @@ namespace ExampleAdvancedCircuitBreakerWithPolly.Services
         {
             Trace.WriteLine($"Circuit State: {_circuitBreakerPolicy.CircuitState}");
 
-            // Если выключатель открыт, обходим запрос в репозиторий и выводим статические данные.
-            if (_circuitBreakerPolicy.CircuitState != CircuitState.Open)
-            {
-                try
-                {
-                    // Обращаемся к репозиторию, через политику выключателя.
-                    return await _circuitBreakerPolicy.ExecuteAsync(async () => await _messageRepository.GetGoodbyeMessage());
-                }
-                catch (Exception e)
-                {
-                    // В случае ошибки, выключатель перейдет в открытое состояние, на указанное время.
-                    // Игнорируем ошибку и выводим статические данные.
-                    Trace.WriteLine(e.Message);
-                }
-            }
-
-            return await new ValueTask<string>("Bypassing a request to the repository.");
+            return await _policyWrap.ExecuteAsync(async () => await _messageRepository.GetGoodbyeMessage());
         }
     }
 }
